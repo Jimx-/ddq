@@ -1,17 +1,19 @@
 use crate::Result;
 
-use super::{LogIterator, Store};
+use super::{LogIterator, Range, Store};
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 pub struct Memory {
     log: BTreeMap<u64, Vec<u8>>,
+    metadata: HashMap<Vec<u8>, Vec<u8>>,
 }
 
 impl Memory {
     pub fn new() -> Self {
         Self {
             log: BTreeMap::new(),
+            metadata: HashMap::new(),
         }
     }
 }
@@ -26,13 +28,8 @@ impl Store for Memory {
         Ok(())
     }
 
-    fn scan(&self, range: Option<(u64, u64)>) -> LogIterator {
-        match range {
-            Some((start, stop)) => {
-                Box::new(self.log.range(start..stop).map(|(_, v)| v).cloned().map(Ok))
-            }
-            None => Box::new(self.log.values().cloned().map(Ok)),
-        }
+    fn scan(&self, range: Range) -> LogIterator {
+        Box::new(self.log.range(range).map(|(_, v)| v).cloned().map(Ok))
     }
 
     fn remove(&mut self, index: u64) -> Result<()> {
@@ -56,6 +53,15 @@ impl Store for Memory {
 
     fn truncate_before(&mut self, index: u64) -> Result<()> {
         self.log = self.log.split_off(&index);
+        Ok(())
+    }
+
+    fn get_metadata(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
+        Ok(self.metadata.get(key).cloned())
+    }
+
+    fn set_metadata(&mut self, key: &[u8], value: Vec<u8>) -> Result<()> {
+        self.metadata.insert(key.to_owned(), value);
         Ok(())
     }
 }

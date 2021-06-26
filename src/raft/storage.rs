@@ -1,6 +1,6 @@
 use crate::{
     raft::{RaftRequest, RaftResponse, State},
-    storage::log,
+    storage::log::{self, Range},
     Error, NodeId, Result,
 };
 
@@ -15,6 +15,18 @@ use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use tokio::sync::RwLock;
 
+pub enum MetadataKey {
+    TermVote,
+}
+
+impl MetadataKey {
+    fn encode(self) -> Vec<u8> {
+        match self {
+            MetadataKey::TermVote => vec![0x1],
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Snapshot {
     pub index: u64,
@@ -28,7 +40,6 @@ pub struct Storage {
     // log: RwLock<BTreeMap<u64, Entry<RaftRequest>>>,
     log: RwLock<Box<dyn log::Store>>,
     state: RwLock<Box<dyn State>>,
-    hs: RwLock<Option<HardState>>,
     current_snapshot: RwLock<Option<Snapshot>>,
 }
 
@@ -36,13 +47,11 @@ impl Storage {
     pub fn new(id: u64, log: Box<dyn log::Store>, state: Box<dyn State>) -> Self {
         let log = RwLock::new(log);
         let state = RwLock::new(state);
-        let hs = RwLock::new(None);
         let current_snapshot = RwLock::new(None);
         Self {
             id,
             log,
             state,
-            hs,
             current_snapshot,
         }
     }
@@ -76,7 +85,7 @@ impl RaftStorage<RaftRequest, RaftResponse> for Storage {
     async fn get_membership_config(&self) -> anyhow::Result<MembershipConfig> {
         let log = self.log.read().await;
         let cfg_opt = log
-            .scan(None)
+            .scan(Range::from(..))
             .rev()
             .map(|r| r.and_then(|v| Self::deserialize::<Entry<RaftRequest>>(&v)))
             .filter_map(Result::ok)
@@ -93,12 +102,11 @@ impl RaftStorage<RaftRequest, RaftResponse> for Storage {
 
     async fn get_initial_state(&self) -> anyhow::Result<InitialState> {
         let membership = self.get_membership_config().await?;
-        let mut hs = self.hs.write().await;
-        let log = self.log.read().await;
+        let mut log = self.log.write().await;
         let state = self.state.read().await;
-        match &mut *hs {
+        match log.get_metadata(&MetadataKey::TermVote.encode())? {
             Some(inner) => {
-                let (last_log_index, last_log_term) = match log.scan(None).rev().next() {
+                let (last_log_index, last_log_term) = match log.scan(Range::from(..)).rev().next() {
                     Some(log) => {
                         let entry = Self::deserialize::<Entry<RaftRequest>>(&log?)?;
                         (entry.index, entry.term)
@@ -110,20 +118,26 @@ impl RaftStorage<RaftRequest, RaftResponse> for Storage {
                     last_log_index,
                     last_log_term,
                     last_applied_log,
-                    hard_state: inner.clone(),
+                    hard_state: Self::deserialize::<HardState>(&inner)?,
                     membership,
                 })
             }
             None => {
                 let new = InitialState::new_initial(self.id);
-                *hs = Some(new.hard_state.clone());
+                log.set_metadata(
+                    &MetadataKey::TermVote.encode(),
+                    Self::serialize(&new.hard_state)?,
+                )?;
                 Ok(new)
             }
         }
     }
 
     async fn save_hard_state(&self, hs: &HardState) -> anyhow::Result<()> {
-        *self.hs.write().await = Some(hs.clone());
+        self.log
+            .write()
+            .await
+            .set_metadata(&MetadataKey::TermVote.encode(), Self::serialize(hs)?)?;
         Ok(())
     }
 
@@ -138,7 +152,7 @@ impl RaftStorage<RaftRequest, RaftResponse> for Storage {
         }
         let log = self.log.read().await;
         Ok(log
-            .scan(Some((start, stop)))
+            .scan(Range::from(start..stop))
             .map(|v| Self::deserialize::<Entry<RaftRequest>>(&v?))
             .collect::<Result<Vec<_>>>()?)
     }
@@ -208,7 +222,7 @@ impl RaftStorage<RaftRequest, RaftResponse> for Storage {
         {
             let log = self.log.read().await;
             membership_config = log
-                .scan(None)
+                .scan(Range::from(..))
                 .rev()
                 .map(|r| r.and_then(|v| Self::deserialize::<Entry<RaftRequest>>(&v)))
                 .filter_map(Result::ok)
@@ -278,7 +292,7 @@ impl RaftStorage<RaftRequest, RaftResponse> for Storage {
         {
             let mut log = self.log.write().await;
             let membership_config = log
-                .scan(None)
+                .scan(Range::from(..))
                 .rev()
                 .map(|r| r.and_then(|v| Self::deserialize::<Entry<RaftRequest>>(&v)))
                 .filter_map(Result::ok)
