@@ -1,24 +1,26 @@
-use crate::{raft, Result};
+use crate::{raft, storage::kv, Result};
 
 pub struct Raft {}
 
 impl Raft {
-    pub fn new_state() -> Result<State> {
-        State::new()
+    pub fn new_state(store: kv::MVCC) -> Result<State> {
+        State::new(store)
     }
 }
 
-pub struct State {}
+pub struct State {
+    applied_index: u64,
+}
 
 impl State {
-    pub fn new() -> Result<Self> {
-        Ok(Self {})
+    pub fn new(store: kv::MVCC) -> Result<Self> {
+        Ok(Self { applied_index: 0 })
     }
 }
 
 impl raft::State for State {
     fn applied_index(&self) -> u64 {
-        0
+        self.applied_index
     }
 
     fn mutate(&mut self, index: u64, command: Vec<u8>) -> Result<Vec<u8>> {

@@ -1,4 +1,8 @@
-use crate::{engine, raft, storage::log, Error, NodeId, Result};
+use crate::{
+    engine, raft,
+    storage::{kv, log},
+    Error, NodeId, Result,
+};
 
 use ::log::{error, info};
 use futures::SinkExt;
@@ -65,9 +69,16 @@ impl Server {
         id: NodeId,
         peers: HashMap<NodeId, String>,
         log: Box<dyn log::Store>,
+        kv: Box<dyn kv::Store>,
     ) -> Result<Self> {
         Ok(Self {
-            raft: raft::Server::new(id, peers, log, Box::new(engine::Raft::new_state()?)).await?,
+            raft: raft::Server::new(
+                id,
+                peers,
+                log,
+                Box::new(engine::Raft::new_state(kv::MVCC::new(kv))?),
+            )
+            .await?,
             req_listener: None,
             raft_listener: None,
         })
