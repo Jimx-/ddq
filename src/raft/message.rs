@@ -1,10 +1,12 @@
 use crate::Result;
 
-use async_raft::raft::{
-    AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
-    VoteRequest, VoteResponse,
+use async_raft::{
+    raft::{
+        AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest,
+        InstallSnapshotResponse, VoteRequest, VoteResponse,
+    },
+    AppData, AppDataResponse,
 };
-use memstore::ClientRequest as MemClientRequest;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,24 +42,54 @@ pub enum Event {
 
     RpcResponse {
         id: Vec<u8>,
-        response: RpcResponse,
+        response: Result<RpcResponse>,
     },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RaftRequest(Vec<u8>);
+
+impl AppData for RaftRequest {}
+impl From<Vec<u8>> for RaftRequest {
+    fn from(v: Vec<u8>) -> Self {
+        Self(v)
+    }
+}
+impl Into<Vec<u8>> for RaftRequest {
+    fn into(self) -> Vec<u8> {
+        self.0
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RaftResponse(Vec<u8>);
+
+impl AppDataResponse for RaftResponse {}
+impl From<Vec<u8>> for RaftResponse {
+    fn from(v: Vec<u8>) -> Self {
+        Self(v)
+    }
+}
+impl Into<Vec<u8>> for RaftResponse {
+    fn into(self) -> Vec<u8> {
+        self.0
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Request {
-    Mutate(Vec<u8>),
-    Query(Vec<u8>),
+    Mutate(RaftRequest),
+    Query(RaftRequest),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Response {
-    State(Vec<u8>),
+    State(RaftResponse),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum RpcRequest {
-    AppendEntries(AppendEntriesRequest<MemClientRequest>),
+    AppendEntries(AppendEntriesRequest<RaftRequest>),
     Vote(VoteRequest),
     InstallSnapshot(InstallSnapshotRequest),
 }

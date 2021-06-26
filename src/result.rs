@@ -20,6 +20,8 @@ pub enum Error {
     Internal(String),
     OutOfMemory,
     RequestAborted,
+    NotImplemented,
+    InconsistentLog,
 }
 
 impl From<io::Error> for Error {
@@ -82,6 +84,8 @@ impl Display for Error {
             Internal(ref e) => write!(f, "Internal error: {}", e),
             OutOfMemory => write!(f, "Out of memory."),
             RequestAborted => write!(f, "Request aborted."),
+            NotImplemented => write!(f, "Not implemented."),
+            InconsistentLog => write!(f, "Inconsistent log."),
         }
     }
 }

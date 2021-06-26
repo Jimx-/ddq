@@ -1,16 +1,21 @@
 use async_raft::Raft;
-use memstore::{ClientRequest as MemClientRequest, ClientResponse as MemClientResponse, MemStore};
 
 mod client;
 mod message;
 mod node;
 mod router;
 mod server;
+mod state;
+mod storage;
 
 pub use client::Client;
-pub use message::{Address, Event, Message, Request, Response, RpcRequest, RpcResponse};
+pub use message::{
+    Address, Event, Message, RaftRequest, RaftResponse, Request, Response, RpcRequest, RpcResponse,
+};
 pub use node::Node;
 pub use router::Router;
 pub use server::Server;
+pub use state::State;
+pub use storage::Storage;
 
-pub type MemRaft = Raft<MemClientRequest, MemClientResponse, Router, MemStore>;
+pub type RaftNode = Raft<RaftRequest, RaftResponse, Router, Storage>;

@@ -1,5 +1,5 @@
 use crate::{
-    raft::{RpcRequest, RpcResponse},
+    raft::{RaftRequest, RpcRequest, RpcResponse},
     Error, Result,
 };
 
@@ -11,7 +11,6 @@ use async_raft::{
     },
     NodeId, RaftNetwork,
 };
-use memstore::ClientRequest as MemClientRequest;
 use tokio::sync::{mpsc, oneshot};
 
 pub struct Router {
@@ -33,11 +32,11 @@ impl Router {
 }
 
 #[async_trait]
-impl RaftNetwork<MemClientRequest> for Router {
+impl RaftNetwork<RaftRequest> for Router {
     async fn append_entries(
         &self,
         target: u64,
-        rpc: AppendEntriesRequest<MemClientRequest>,
+        rpc: AppendEntriesRequest<RaftRequest>,
     ) -> anyhow::Result<AppendEntriesResponse> {
         match self.request(target, RpcRequest::AppendEntries(rpc)).await? {
             RpcResponse::AppendEntries(resp) => Ok(resp),

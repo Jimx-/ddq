@@ -173,12 +173,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-raft",
+ "bincode",
  "clap",
  "config",
  "env_logger",
  "futures",
  "log",
- "memstore",
  "rand 0.8.4",
  "serde 1.0.126",
  "tokio",
@@ -473,22 +473,6 @@ name = "memchr"
 version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b16bd47d9e329435e309c58469fe0791c2d0d1ba96ec0954152a5ae2b04387dc"
-
-[[package]]
-name = "memstore"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2dc2cd13307c5a22eccba87a86538c5c13474a864294ebcdfe8119c724b11fe5"
-dependencies = [
- "anyhow",
- "async-raft",
- "serde 1.0.126",
- "serde_json",
- "thiserror",
- "tokio",
- "tracing",
- "tracing-futures",
-]
 
 [[package]]
 name = "mio"

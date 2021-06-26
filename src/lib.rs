@@ -2,6 +2,7 @@ mod client;
 mod result;
 mod server;
 
+pub mod engine;
 pub mod raft;
 
 pub use self::{

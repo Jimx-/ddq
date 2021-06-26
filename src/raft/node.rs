@@ -1,10 +1,13 @@
 use crate::{
-    raft::{Address, Event, MemRaft, Message, Request, Response, Router, RpcRequest, RpcResponse},
+    engine,
+    raft::{
+        Address, Event, Message, RaftNode, Request, Response, Router, RpcRequest, RpcResponse,
+        Storage,
+    },
     Error, NodeId, Result,
 };
 
 use async_raft::Config;
-use memstore::MemStore;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
@@ -12,7 +15,7 @@ use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
 pub struct Node {
     id: u64,
     peers: Vec<u64>,
-    raft: MemRaft,
+    raft: RaftNode,
     node_tx: mpsc::UnboundedSender<Message>,
     queue_tx: mpsc::UnboundedSender<(Address, Event)>,
 }
@@ -27,8 +30,9 @@ impl Node {
         let config = Arc::new(Config::build("ddq".into()).validate().unwrap());
         let heartbeat_interval = config.heartbeat_interval;
         let router = Arc::new(Router::new(rpc_tx));
-        let storage = Arc::new(MemStore::new(id));
-        let raft = MemRaft::new(id, config, router, storage);
+        let state = Box::new(engine::Raft::new_state()?);
+        let storage = Arc::new(Storage::new(id, state));
+        let raft = RaftNode::new(id, config, router, storage);
 
         let (queue_tx, queue_rx) = mpsc::unbounded_channel();
         tokio::spawn(Self::forward_request(
@@ -50,7 +54,7 @@ impl Node {
 
     async fn forward_request(
         id: u64,
-        raft: MemRaft,
+        raft: RaftNode,
         ticks: u64,
         node_tx: mpsc::UnboundedSender<Message>,
         queue_rx: mpsc::UnboundedReceiver<(Address, Event)>,
@@ -144,10 +148,12 @@ impl Node {
 
     pub async fn step(&self, msg: Message) -> Result<()> {
         match msg.event {
-            Event::RpcRequest { id, request } => {
-                let response = self.handle_rpc(request).await?;
-                Self::send(&self.node_tx, msg.from, Event::RpcResponse { id, response })?;
-            }
+            Event::RpcRequest { id, request } => match self.handle_rpc(request).await {
+                Err(err @ Error::Internal(_)) => return Err(err),
+                response => {
+                    Self::send(&self.node_tx, msg.from, Event::RpcResponse { id, response })?;
+                }
+            },
 
             Event::ClientRequest { id, request } => {
                 if Some(self.id) == self.raft.current_leader().await {
@@ -189,7 +195,7 @@ impl Node {
         })
     }
 
-    async fn handle_client_request(raft: &MemRaft, request: Request) -> Result<Response> {
+    async fn handle_client_request(raft: &RaftNode, request: Request) -> Result<Response> {
         log::info!("Process client request {:?}", request);
         Err(Error::OutOfMemory)
     }

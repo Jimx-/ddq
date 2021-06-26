@@ -49,8 +49,11 @@ impl Client {
     }
 
     pub async fn raft_mutate(&self, command: Vec<u8>) -> Result<Vec<u8>> {
-        match self.raft_request(raft::Request::Mutate(command)).await? {
-            raft::Response::State(resp) => Ok(resp),
+        match self
+            .raft_request(raft::Request::Mutate(command.into()))
+            .await?
+        {
+            raft::Response::State(resp) => Ok(resp.into()),
             // resp => Err(Error::Internal(format!(
             //     "Unexpected Raft mutate response: {:?}",
             //     resp
@@ -59,8 +62,11 @@ impl Client {
     }
 
     pub async fn raft_query(&self, command: Vec<u8>) -> Result<Vec<u8>> {
-        match self.raft_request(raft::Request::Query(command)).await? {
-            raft::Response::State(resp) => Ok(resp),
+        match self
+            .raft_request(raft::Request::Query(command.into()))
+            .await?
+        {
+            raft::Response::State(resp) => Ok(resp.into()),
             // resp => Err(Error::Internal(format!(
             //     "Unexpected Raft query response: {:?}",
             //     resp
