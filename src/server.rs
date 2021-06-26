@@ -47,7 +47,7 @@ impl Session {
         );
 
         while let Some(request) = stream.try_next().await? {
-            let response = self.request(request).await?;
+            let response = self.request(request).await;
             stream.send(response).await?;
         }
         Ok(())
