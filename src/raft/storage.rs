@@ -1,6 +1,6 @@
 use crate::{
     raft::{RaftRequest, RaftResponse, State},
-    Error, NodeId,
+    Error, NodeId, Result,
 };
 
 use async_raft::{
@@ -42,6 +42,11 @@ impl Storage {
             hs,
             current_snapshot,
         }
+    }
+
+    pub async fn query(&self, command: Vec<u8>) -> Result<Vec<u8>> {
+        let state = self.state.read().await;
+        state.query(command)
     }
 }
 

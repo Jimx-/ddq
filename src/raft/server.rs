@@ -88,6 +88,8 @@ impl Server {
                         Message { from: Address::Peer(src), event: Event::RpcResponse { id, response }, .. } => {
                             if let Some(response_tx) = rpc_requests.remove(&(src, id)) {
                                 response_tx.send(response).map_err(|e| Error::Internal(format!("Failed to send RPC response {:?}", e)))?;
+                            } else {
+                                log::error!("Spurious RPC response");
                             }
                         }
 

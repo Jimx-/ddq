@@ -22,6 +22,7 @@ pub enum Error {
     RequestAborted,
     NotImplemented,
     InconsistentLog,
+    Raft(String),
 }
 
 impl From<io::Error> for Error {
@@ -62,7 +63,7 @@ impl From<tokio::sync::oneshot::error::RecvError> for Error {
 
 impl From<async_raft::RaftError> for Error {
     fn from(err: async_raft::RaftError) -> Self {
-        Error::Internal(err.to_string())
+        Error::Raft(err.to_string())
     }
 }
 
@@ -86,6 +87,7 @@ impl Display for Error {
             RequestAborted => write!(f, "Request aborted."),
             NotImplemented => write!(f, "Not implemented."),
             InconsistentLog => write!(f, "Inconsistent log."),
+            Raft(ref e) => write!(f, "Raft error: {}", e),
         }
     }
 }

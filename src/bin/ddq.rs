@@ -93,7 +93,7 @@ async fn main() -> Result<()> {
         server1.serve(),
         server2.serve(),
         server3.serve(),
-        client.raft_mutate(vec![])
+        client.raft_mutate(vec![]),
     )?;
 
     Ok(())
