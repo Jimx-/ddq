@@ -4,6 +4,7 @@ mod server;
 
 pub mod engine;
 pub mod raft;
+pub mod storage;
 
 pub use self::{
     client::Client,

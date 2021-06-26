@@ -1,9 +1,9 @@
 use crate::{
-    engine,
     raft::{
         Address, Event, Message, RaftNode, Request, Response, Router, RpcRequest, RpcResponse,
-        Storage,
+        State, Storage,
     },
+    storage::log,
     Error, NodeId, Result,
 };
 
@@ -26,14 +26,15 @@ impl Node {
     pub async fn new(
         id: u64,
         peers: Vec<u64>,
+        log: Box<dyn log::Store>,
+        state: Box<dyn State>,
         rpc_tx: mpsc::UnboundedSender<(NodeId, RpcRequest, oneshot::Sender<Result<RpcResponse>>)>,
         node_tx: mpsc::UnboundedSender<Message>,
     ) -> Result<Self> {
         let config = Arc::new(Config::build("ddq".into()).validate().unwrap());
         let heartbeat_interval = config.heartbeat_interval;
         let router = Arc::new(Router::new(rpc_tx));
-        let state = Box::new(engine::Raft::new_state()?);
-        let storage = Arc::new(Storage::new(id, state));
+        let storage = Arc::new(Storage::new(id, log, state));
         let raft = RaftNode::new(id, config, router, storage.clone());
 
         let (queue_tx, queue_rx) = mpsc::unbounded_channel();

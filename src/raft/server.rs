@@ -1,10 +1,11 @@
 use crate::{
-    raft::{Address, Event, Message, Node, Request, Response, RpcRequest, RpcResponse},
+    raft::{Address, Event, Message, Node, Request, Response, RpcRequest, RpcResponse, State},
+    storage::log,
     Error, NodeId, Result,
 };
 
+use ::log::{debug, error};
 use futures::SinkExt;
-use log::{debug, error};
 use std::{collections::HashMap, time::Duration};
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -26,14 +27,27 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn new(id: NodeId, peers: HashMap<NodeId, String>) -> Result<Self> {
+    pub async fn new(
+        id: NodeId,
+        peers: HashMap<NodeId, String>,
+        log: Box<dyn log::Store>,
+        state: Box<dyn State>,
+    ) -> Result<Self> {
         let (rpc_tx, rpc_rx) =
             mpsc::unbounded_channel::<(NodeId, RpcRequest, oneshot::Sender<Result<RpcResponse>>)>();
 
         let (node_tx, node_rx) = mpsc::unbounded_channel::<Message>();
         Ok(Self {
             id,
-            node: Node::new(id, peers.keys().cloned().collect(), rpc_tx, node_tx).await?,
+            node: Node::new(
+                id,
+                peers.keys().cloned().collect(),
+                log,
+                state,
+                rpc_tx,
+                node_tx,
+            )
+            .await?,
             peers,
             node_rx: node_rx,
             rpc_rx: rpc_rx,
@@ -88,8 +102,6 @@ impl Server {
                         Message { from: Address::Peer(src), event: Event::RpcResponse { id, response }, .. } => {
                             if let Some(response_tx) = rpc_requests.remove(&(src, id)) {
                                 response_tx.send(response).map_err(|e| Error::Internal(format!("Failed to send RPC response {:?}", e)))?;
-                            } else {
-                                log::error!("Spurious RPC response");
                             }
                         }
 
