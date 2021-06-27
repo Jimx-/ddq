@@ -1,4 +1,5 @@
 mod btree;
+mod encoding;
 mod mvcc;
 
 pub use btree::BTreeStore;

@@ -1,4 +1,4 @@
-use ddq::{storage, Client, Error, NodeId, Result, Server};
+use ddq::{engine, storage, Client, Error, NodeId, Result, Server};
 
 use clap::{AppSettings, Clap};
 use serde::Deserialize;
@@ -111,13 +111,17 @@ async fn main() -> Result<()> {
     };
 
     let client = Client::new("127.0.0.1:8000").await?;
+    let raft = engine::kv::Raft::new(client);
 
-    tokio::try_join!(
-        server1.serve(),
-        server2.serve(),
-        server3.serve(),
-        client.raft_mutate(vec![]),
-    )?;
+    tokio::try_join!(server1.serve(), server2.serve(), server3.serve(), async {
+        let txn = raft.begin().await?;
+        println!("{}", txn.id());
+        txn.put(&[0x1u8], vec![0x1u8]).await?;
+        txn.put(&[0x2u8], vec![0x2u8]).await?;
+        println!("{:?}", txn.get(&[0x1u8]).await?);
+        txn.commit().await?;
+        Ok(())
+    })?;
 
     Ok(())
 }

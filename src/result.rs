@@ -18,16 +18,23 @@ pub enum Error {
     InvalidState(String),
     InvalidArgument(String),
     Internal(String),
+    Raft(String),
     OutOfMemory,
     RequestAborted,
     NotImplemented,
     InconsistentLog,
-    Raft(String),
+    WriteConflict,
 }
 
 impl From<io::Error> for Error {
     fn from(ioe: io::Error) -> Self {
         Error::Io(ioe.to_string())
+    }
+}
+
+impl From<std::array::TryFromSliceError> for Error {
+    fn from(err: std::array::TryFromSliceError) -> Self {
+        Error::Internal(err.to_string())
     }
 }
 
@@ -83,11 +90,12 @@ impl Display for Error {
             Io(ref e) => write!(f, "IO error: {}", e),
             Config(ref e) => write!(f, "Config error: {}", e),
             Internal(ref e) => write!(f, "Internal error: {}", e),
+            Raft(ref e) => write!(f, "Raft error: {}", e),
             OutOfMemory => write!(f, "Out of memory."),
             RequestAborted => write!(f, "Request aborted."),
             NotImplemented => write!(f, "Not implemented."),
             InconsistentLog => write!(f, "Inconsistent log."),
-            Raft(ref e) => write!(f, "Raft error: {}", e),
+            WriteConflict => write!(f, "Write conflict."),
         }
     }
 }

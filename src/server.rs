@@ -76,7 +76,7 @@ impl Server {
                 id,
                 peers,
                 log,
-                Box::new(engine::Raft::new_state(kv::MVCC::new(kv))?),
+                Box::new(engine::kv::Raft::new_state(kv::MVCC::new(kv))?),
             )
             .await?,
             req_listener: None,
