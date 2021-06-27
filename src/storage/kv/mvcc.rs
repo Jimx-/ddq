@@ -1,11 +1,13 @@
 use crate::{Error, Result};
 
-use super::{encoding, Range, Store};
+use super::{encoding, KvIterator, Range, Store};
 
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
     collections::HashSet,
+    iter::Peekable,
+    ops::{Bound, RangeBounds},
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 
@@ -134,7 +136,7 @@ impl Transaction {
             .rev();
         while let Some((key, val)) = iter.next().transpose()? {
             match Key::decode(&key)? {
-                Key::Record(k, version) => {
+                Key::Record(_, version) => {
                     if self.snapshot.is_visible(version) {
                         return deserialize(&val);
                     }
@@ -188,6 +190,43 @@ impl Transaction {
 
     pub fn delete(&mut self, key: &[u8]) -> Result<()> {
         self.write(key, None)
+    }
+
+    pub fn scan(&self, range: impl RangeBounds<Vec<u8>>) -> Result<KvIterator> {
+        let start = match range.start_bound() {
+            Bound::Excluded(k) => Bound::Excluded(Key::Record(k.into(), std::u64::MAX).encode()),
+            Bound::Included(k) => Bound::Included(Key::Record(k.into(), 0).encode()),
+            Bound::Unbounded => Bound::Included(Key::Record(vec![].into(), 0).encode()),
+        };
+        let end = match range.end_bound() {
+            Bound::Excluded(k) => Bound::Excluded(Key::Record(k.into(), 0).encode()),
+            Bound::Included(k) => Bound::Included(Key::Record(k.into(), std::u64::MAX).encode()),
+            Bound::Unbounded => Bound::Unbounded,
+        };
+        let scan = self.store.read().unwrap().scan(Range::from((start, end)));
+        Ok(Box::new(MVCCIterator::new(scan, self.snapshot.clone())))
+    }
+
+    pub fn scan_prefix(&self, prefix: &[u8]) -> Result<KvIterator> {
+        if prefix.is_empty() {
+            return Err(Error::Internal("Scan prefix cannot be empty".into()));
+        }
+        let start = prefix.to_vec();
+        let mut end = start.clone();
+        for i in (0..end.len()).rev() {
+            match end[i] {
+                0xff if i == 0 => return Err(Error::Internal("Invalid prefix scan range".into())),
+                0xff => {
+                    end[i] = 0x00;
+                    continue;
+                }
+                v => {
+                    end[i] = v + 1;
+                    break;
+                }
+            }
+        }
+        self.scan(start..end)
     }
 }
 
@@ -284,6 +323,78 @@ impl<'a> Key<'a> {
             ));
         }
         Ok(key)
+    }
+}
+
+pub struct MVCCIterator {
+    inner: Peekable<KvIterator>,
+    next_back_key: Option<Vec<u8>>,
+}
+
+impl MVCCIterator {
+    fn new(inner: KvIterator, snapshot: Snapshot) -> Self {
+        let inner: KvIterator = Box::new(inner.filter_map(move |r| {
+            r.and_then(|(k, v)| match Key::decode(&k)? {
+                Key::Record(key, version) => {
+                    if !snapshot.is_visible(version) {
+                        Ok(None)
+                    } else {
+                        Ok(Some((key.into_owned(), v)))
+                    }
+                }
+                k => Err(Error::Internal(format!("Expected Record, got {:?}", k))),
+            })
+            .transpose()
+        }));
+        Self {
+            inner: inner.peekable(),
+            next_back_key: None,
+        }
+    }
+
+    fn try_next(&mut self) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
+        while let Some((key, value)) = self.inner.next().transpose()? {
+            if match self.inner.peek() {
+                Some(Ok((next_key, _))) if *next_key != key => true,
+                Some(Ok(_)) => false,
+                Some(Err(err)) => return Err(err.clone()),
+                _ => true,
+            } {
+                if let Some(value) = deserialize(&value)? {
+                    return Ok(Some((key, value)));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    fn try_next_back(&mut self) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
+        while let Some((key, value)) = self.inner.next().transpose()? {
+            if match &self.next_back_key {
+                Some(next_key) if *next_key != key => true,
+                Some(_) => false,
+                _ => true,
+            } {
+                self.next_back_key = Some(key.clone());
+                if let Some(value) = deserialize(&value)? {
+                    return Ok(Some((key, value)));
+                }
+            }
+        }
+        Ok(None)
+    }
+}
+
+impl Iterator for MVCCIterator {
+    type Item = Result<(Vec<u8>, Vec<u8>)>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.try_next().transpose()
+    }
+}
+
+impl DoubleEndedIterator for MVCCIterator {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.try_next_back().transpose()
     }
 }
 

@@ -119,6 +119,11 @@ async fn main() -> Result<()> {
         txn.put(&[0x1u8], vec![0x1u8]).await?;
         txn.put(&[0x2u8], vec![0x2u8]).await?;
         println!("{:?}", txn.get(&[0x1u8]).await?);
+        for kv in txn.scan(..).await? {
+            let (k, v) = kv?;
+            println!("{:?} {:?}", k, v);
+        }
+
         txn.commit().await?;
         Ok(())
     })?;

@@ -1,6 +1,7 @@
 use crate::{raft, storage::kv, Client, Error, Result};
 
 use serde::{Deserialize, Serialize};
+use std::ops::RangeBounds;
 
 #[derive(Clone, Serialize, Deserialize)]
 enum Mutation {
@@ -15,6 +16,9 @@ enum Mutation {
 #[derive(Clone, Serialize, Deserialize)]
 enum Query {
     Get(u64, Vec<u8>),
+
+    Scan(u64, kv::Range),
+    ScanPrefix(u64, Vec<u8>),
 }
 
 #[derive(Clone)]
@@ -103,6 +107,30 @@ impl Transaction {
     pub async fn delete(&self, key: &[u8]) -> Result<()> {
         Raft::deserialize(&self.mutate(Mutation::Delete(self.id, key.into())).await?)
     }
+
+    pub async fn scan(&self, range: impl RangeBounds<Vec<u8>>) -> Result<kv::KvIterator> {
+        Ok(Box::new(
+            Raft::deserialize::<Vec<_>>(
+                &self
+                    .query(Query::Scan(self.id, kv::Range::from(range)))
+                    .await?,
+            )?
+            .into_iter()
+            .map(Ok),
+        ))
+    }
+
+    pub async fn scan_prefix(&self, prefix: &[u8]) -> Result<kv::KvIterator> {
+        Ok(Box::new(
+            Raft::deserialize::<Vec<_>>(
+                &self
+                    .query(Query::ScanPrefix(self.id, prefix.into()))
+                    .await?,
+            )?
+            .into_iter()
+            .map(Ok),
+        ))
+    }
 }
 
 pub struct State {
@@ -150,6 +178,20 @@ impl raft::State for State {
     fn query(&self, command: Vec<u8>) -> Result<Vec<u8>> {
         match Raft::deserialize(&command)? {
             Query::Get(tid, key) => Raft::serialize(&self.store.resume(tid)?.get(&key)?),
+            Query::Scan(tid, range) => Raft::serialize(
+                &self
+                    .store
+                    .resume(tid)?
+                    .scan(range)?
+                    .collect::<Result<Vec<_>>>()?,
+            ),
+            Query::ScanPrefix(tid, prefix) => Raft::serialize(
+                &self
+                    .store
+                    .resume(tid)?
+                    .scan_prefix(&prefix)?
+                    .collect::<Result<Vec<_>>>()?,
+            ),
         }
     }
 

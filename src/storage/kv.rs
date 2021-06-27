@@ -7,6 +7,7 @@ pub use mvcc::MVCC;
 
 use crate::Result;
 
+use serde::{Deserialize, Serialize};
 use std::ops::{Bound, RangeBounds};
 
 pub trait Store: Send + Sync {
@@ -21,6 +22,7 @@ pub trait Store: Send + Sync {
     fn flush(&mut self) -> Result<()>;
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Range {
     start: Bound<Vec<u8>>,
     end: Bound<Vec<u8>>,
