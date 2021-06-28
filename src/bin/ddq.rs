@@ -1,4 +1,4 @@
-use ddq::{engine, storage, Client, Error, NodeId, Result, Server};
+use ddq::{storage, Error, NodeId, Result, Server};
 
 use clap::{AppSettings, Clap};
 use serde::Deserialize;
@@ -15,7 +15,7 @@ struct Opts {
 
 #[derive(Debug, Deserialize)]
 struct Config {
-    id: String,
+    id: NodeId,
     peers: HashMap<NodeId, String>,
     listen_req: String,
     listen_raft: String,
@@ -26,7 +26,7 @@ struct Config {
 impl Config {
     fn new(file: &str) -> Result<Self> {
         let mut c = config::Config::new();
-        c.set_default("id", "ddq")?;
+        c.set_default("id", "0")?;
         c.set_default("peers", HashMap::<String, String>::new())?;
         c.set_default("listen_req", "0.0.0.0:9605")?;
         c.set_default("listen_raft", "0.0.0.0:9705")?;
@@ -72,61 +72,17 @@ async fn main() -> Result<()> {
 
     let cfg = Config::new(&opts.config)?;
 
-    // let server = Server::new(&cfg.id, cfg.peers)
-    //     .await?
-    //     .listen(&cfg.listen_req, &cfg.listen_raft)
-    //     .await?;
+    Server::new(
+        cfg.id,
+        cfg.peers.clone(),
+        cfg.get_log_store()?,
+        cfg.get_kv_store()?,
+    )
+    .await?
+    .listen(&cfg.listen_req, &cfg.listen_raft)
+    .await?
+    .serve()
+    .await
 
-    // tokio::try_join!(server.serve(), client.raft_mutate(vec![]))?;
-
-    let server1 = {
-        let mut peers = HashMap::new();
-        peers.insert(1, "0.0.0.0:8081".to_owned());
-        peers.insert(2, "0.0.0.0:8082".to_owned());
-
-        Server::new(0, peers.clone(), cfg.get_log_store()?, cfg.get_kv_store()?)
-            .await?
-            .listen("0.0.0.0:8000", "0.0.0.0:8080")
-            .await?
-    };
-
-    let server2 = {
-        let mut peers = HashMap::new();
-        peers.insert(0, "0.0.0.0:8080".to_owned());
-        peers.insert(2, "0.0.0.0:8082".to_owned());
-        Server::new(1, peers.clone(), cfg.get_log_store()?, cfg.get_kv_store()?)
-            .await?
-            .listen("0.0.0.0:7001", "0.0.0.0:8081")
-            .await?
-    };
-
-    let server3 = {
-        let mut peers = HashMap::new();
-        peers.insert(0, "0.0.0.0:8080".to_owned());
-        peers.insert(1, "0.0.0.0:8081".to_owned());
-        Server::new(2, peers.clone(), cfg.get_log_store()?, cfg.get_kv_store()?)
-            .await?
-            .listen("0.0.0.0:7002", "0.0.0.0:8082")
-            .await?
-    };
-
-    let client = Client::new("127.0.0.1:8000").await?;
-    let raft = engine::kv::Raft::new(client);
-
-    tokio::try_join!(server1.serve(), server2.serve(), server3.serve(), async {
-        let txn = raft.begin().await?;
-        println!("{}", txn.id());
-        txn.put(&[0x1u8], vec![0x1u8]).await?;
-        txn.put(&[0x2u8], vec![0x2u8]).await?;
-        println!("{:?}", txn.get(&[0x1u8]).await?);
-        for kv in txn.scan(..).await? {
-            let (k, v) = kv?;
-            println!("{:?} {:?}", k, v);
-        }
-
-        txn.commit().await?;
-        Ok(())
-    })?;
-
-    Ok(())
+    // Ok(())
 }

@@ -43,8 +43,8 @@ impl Raft {
         bincode::deserialize(bytes).map_err(|e| Error::Internal(e.to_string()))
     }
 
-    pub async fn begin(&self) -> Result<Transaction> {
-        Transaction::begin(self.client.clone()).await
+    pub fn begin(&self) -> Result<Transaction> {
+        Transaction::begin(self.client.clone())
     }
 
     pub fn resume(&self, id: u64) -> Result<Transaction> {
@@ -59,12 +59,10 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    async fn begin(client: Client) -> Result<Self> {
-        let id = Raft::deserialize(
-            &client
-                .raft_mutate(Raft::serialize(&Mutation::Begin)?)
-                .await?,
-        )?;
+    fn begin(client: Client) -> Result<Self> {
+        let id = Raft::deserialize(&futures::executor::block_on(
+            client.raft_mutate(Raft::serialize(&Mutation::Begin)?),
+        )?)?;
         Ok(Self { client, id })
     }
 
@@ -76,59 +74,49 @@ impl Transaction {
         self.id
     }
 
-    async fn mutate(&self, mutation: Mutation) -> Result<Vec<u8>> {
-        self.client.raft_mutate(Raft::serialize(&mutation)?).await
+    fn mutate(&self, mutation: Mutation) -> Result<Vec<u8>> {
+        futures::executor::block_on(self.client.raft_mutate(Raft::serialize(&mutation)?))
     }
 
-    async fn query(&self, query: Query) -> Result<Vec<u8>> {
-        self.client.raft_query(Raft::serialize(&query)?).await
+    fn query(&self, query: Query) -> Result<Vec<u8>> {
+        futures::executor::block_on(self.client.raft_query(Raft::serialize(&query)?))
     }
 
-    pub async fn commit(self) -> Result<()> {
-        Raft::deserialize(&self.mutate(Mutation::Commit(self.id)).await?)
+    pub fn commit(self) -> Result<()> {
+        Raft::deserialize(&self.mutate(Mutation::Commit(self.id))?)
     }
 
-    pub async fn rollback(self) -> Result<()> {
-        Raft::deserialize(&self.mutate(Mutation::Rollback(self.id)).await?)
+    pub fn rollback(self) -> Result<()> {
+        Raft::deserialize(&self.mutate(Mutation::Rollback(self.id))?)
     }
 
-    pub async fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        Raft::deserialize(&self.query(Query::Get(self.id, key.into())).await?)
+    pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
+        Raft::deserialize(&self.query(Query::Get(self.id, key.into()))?)
     }
 
-    pub async fn put(&self, key: &[u8], value: Vec<u8>) -> Result<()> {
-        Raft::deserialize(
-            &self
-                .mutate(Mutation::Put(self.id, key.into(), value))
-                .await?,
-        )
+    pub fn put(&self, key: &[u8], value: Vec<u8>) -> Result<()> {
+        Raft::deserialize(&self.mutate(Mutation::Put(self.id, key.into(), value))?)
     }
 
-    pub async fn delete(&self, key: &[u8]) -> Result<()> {
-        Raft::deserialize(&self.mutate(Mutation::Delete(self.id, key.into())).await?)
+    pub fn delete(&self, key: &[u8]) -> Result<()> {
+        Raft::deserialize(&self.mutate(Mutation::Delete(self.id, key.into()))?)
     }
 
-    pub async fn scan(&self, range: impl RangeBounds<Vec<u8>>) -> Result<kv::KvIterator> {
+    pub fn scan(&self, range: impl RangeBounds<Vec<u8>>) -> Result<kv::KvIterator> {
         Ok(Box::new(
             Raft::deserialize::<Vec<_>>(
-                &self
-                    .query(Query::Scan(self.id, kv::Range::from(range)))
-                    .await?,
+                &self.query(Query::Scan(self.id, kv::Range::from(range)))?,
             )?
             .into_iter()
             .map(Ok),
         ))
     }
 
-    pub async fn scan_prefix(&self, prefix: &[u8]) -> Result<kv::KvIterator> {
+    pub fn scan_prefix(&self, prefix: &[u8]) -> Result<kv::KvIterator> {
         Ok(Box::new(
-            Raft::deserialize::<Vec<_>>(
-                &self
-                    .query(Query::ScanPrefix(self.id, prefix.into()))
-                    .await?,
-            )?
-            .into_iter()
-            .map(Ok),
+            Raft::deserialize::<Vec<_>>(&self.query(Query::ScanPrefix(self.id, prefix.into()))?)?
+                .into_iter()
+                .map(Ok),
         ))
     }
 }

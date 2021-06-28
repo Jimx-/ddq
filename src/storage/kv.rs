@@ -1,6 +1,7 @@
 mod btree;
-mod encoding;
 mod mvcc;
+
+pub mod encoding;
 
 pub use btree::BTreeStore;
 pub use mvcc::MVCC;
