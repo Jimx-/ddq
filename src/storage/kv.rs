@@ -23,7 +23,7 @@ pub trait Store: Send + Sync {
     fn flush(&mut self) -> Result<()>;
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Range {
     start: Bound<Vec<u8>>,
     end: Bound<Vec<u8>>,

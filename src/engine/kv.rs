@@ -3,7 +3,7 @@ use crate::{raft, storage::kv, Client, Error, Result};
 use serde::{Deserialize, Serialize};
 use std::ops::RangeBounds;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 enum Mutation {
     Begin,
     Commit(u64),
@@ -13,7 +13,7 @@ enum Mutation {
     Delete(u64, Vec<u8>),
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 enum Query {
     Get(u64, Vec<u8>),
 

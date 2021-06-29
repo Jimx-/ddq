@@ -2,8 +2,24 @@ use crate::{engine::sql, Client, Error};
 
 use libc::{c_char, c_int, c_uint, c_ulonglong};
 use std::{cell::RefCell, ffi::CStr, sync::Arc};
+use tokio::runtime::Runtime;
 
 type ItemPointer = u64;
+
+pub struct Db {
+    client: sql::Client,
+    #[allow(dead_code)]
+    runtime: Runtime,
+}
+
+impl Db {
+    fn new(client: Client, runtime: Runtime) -> Self {
+        Self {
+            client: sql::Client::new(client),
+            runtime,
+        }
+    }
+}
 
 #[no_mangle]
 pub extern "C" fn sq_init() {
@@ -64,25 +80,27 @@ pub unsafe extern "C" fn sq_last_error_message(buffer: *mut c_char, length: c_in
 }
 
 #[no_mangle]
-pub extern "C" fn sq_create_db(addr: *const c_char) -> *const sql::Client {
+pub extern "C" fn sq_create_db(addr: *const c_char) -> *const Db {
     let addr = unsafe {
         assert!(!addr.is_null());
         CStr::from_ptr(addr)
     };
     let addr_str = addr.to_str().unwrap();
-    let client = futures::executor::block_on(Client::new(addr_str)).map(|r| sql::Client::new(r));
-    let client = match client {
-        Ok(client) => client,
+    let runtime = Runtime::new().unwrap();
+    let client = runtime.block_on(Client::new(addr_str));
+    let db = client.map(|r| Db::new(r, runtime));
+    let db = match db {
+        Ok(db) => db,
         Err(e) => {
             update_last_error(e);
             return std::ptr::null();
         }
     };
-    Arc::into_raw(Arc::new(client))
+    Arc::into_raw(Arc::new(db))
 }
 
 #[no_mangle]
-pub extern "C" fn sq_free_db(db: *const sql::Client) {
+pub extern "C" fn sq_free_db(db: *const Db) {
     if db.is_null() {
         return;
     }
@@ -93,7 +111,7 @@ pub extern "C" fn sq_free_db(db: *const sql::Client) {
 
 #[no_mangle]
 pub extern "C" fn sq_start_transaction(
-    db: *const sql::Client,
+    db: *const Db,
     _isolation_level: c_int,
 ) -> *mut sql::Transaction {
     let db = unsafe {
@@ -101,7 +119,7 @@ pub extern "C" fn sq_start_transaction(
         &*db
     };
 
-    let txn = match db.begin() {
+    let txn = match db.client.begin() {
         Ok(txn) => txn,
         Err(e) => {
             update_last_error(e);
@@ -116,7 +134,7 @@ pub extern "C" fn sq_start_transaction(
 pub extern "C" fn sq_free_transaction(_txn: *mut sql::Transaction) {}
 
 #[no_mangle]
-pub extern "C" fn sq_commit_transaction(_db: *const sql::Client, txn: *mut sql::Transaction) {
+pub extern "C" fn sq_commit_transaction(_db: *const Db, txn: *mut sql::Transaction) {
     let txn = unsafe {
         assert!(!txn.is_null());
         Box::from_raw(txn)
@@ -131,17 +149,13 @@ pub extern "C" fn sq_commit_transaction(_db: *const sql::Client, txn: *mut sql::
 }
 
 #[no_mangle]
-pub extern "C" fn sq_create_table(
-    db: *const sql::Client,
-    _db_id: u64,
-    table_id: u64,
-) -> *const sql::Table {
+pub extern "C" fn sq_create_table(db: *const Db, _db_id: u64, table_id: u64) -> *const sql::Table {
     let db = unsafe {
         assert!(!db.is_null());
         &*db
     };
 
-    let table = match db.create_table(table_id) {
+    let table = match db.client.create_table(table_id) {
         Ok(table) => table,
         Err(e) => {
             update_last_error(e);
@@ -153,17 +167,13 @@ pub extern "C" fn sq_create_table(
 }
 
 #[no_mangle]
-pub extern "C" fn sq_open_table(
-    db: *const sql::Client,
-    _db_id: u64,
-    table_id: u64,
-) -> *const sql::Table {
+pub extern "C" fn sq_open_table(db: *const Db, _db_id: u64, table_id: u64) -> *const sql::Table {
     let db = unsafe {
         assert!(!db.is_null());
         &*db
     };
 
-    let table = match db.open_table(table_id) {
+    let table = match db.client.open_table(table_id) {
         Ok(Some(table)) => table,
         Ok(None) => {
             return std::ptr::null();
@@ -188,17 +198,14 @@ pub extern "C" fn sq_free_table(table: *const sql::Table) {
 }
 
 #[no_mangle]
-pub extern "C" fn sq_table_get_file_size(
-    _table: *const sql::Table,
-    _db: *const sql::Client,
-) -> c_ulonglong {
+pub extern "C" fn sq_table_get_file_size(_table: *const sql::Table, _db: *const Db) -> c_ulonglong {
     0 as c_ulonglong
 }
 
 #[no_mangle]
 pub extern "C" fn sq_table_insert_tuple(
     table: *const sql::Table,
-    _db: *const sql::Client,
+    _db: *const Db,
     txn: *const sql::Transaction,
     data: *const u8,
     len: u64,
@@ -238,7 +245,7 @@ pub extern "C" fn sq_free_item_pointer(pointer: *const ItemPointer) {
 #[no_mangle]
 pub extern "C" fn sq_table_begin_scan<'a>(
     table: *const sql::Table,
-    _db: *const sql::Client,
+    _db: *const Db,
     txn: *mut sql::Transaction,
 ) -> *mut sql::TableScan {
     let table = unsafe {
@@ -282,7 +289,7 @@ fn get_scan_direction(dir: c_int) -> sql::ScanDirection {
 #[no_mangle]
 pub extern "C" fn sq_table_scan_next<'a>(
     scan: *mut sql::TableScan,
-    _db: *const sql::Client,
+    _db: *const Db,
     dir: c_int,
 ) -> *const Vec<u8> {
     let scan = unsafe {
@@ -355,13 +362,16 @@ pub unsafe extern "C" fn sq_tuple_get_data<'a>(
 }
 
 #[no_mangle]
-pub extern "C" fn sq_get_next_oid(db: *const sql::Client) -> u64 {
+pub extern "C" fn sq_create_checkpoint(_db: *const Db) {}
+
+#[no_mangle]
+pub extern "C" fn sq_get_next_oid(db: *const Db) -> u64 {
     let db = unsafe {
         assert!(!db.is_null());
         &*db
     };
 
-    match db.get_next_oid() {
+    match db.client.get_next_oid() {
         Ok(oid) => oid,
         Err(e) => {
             update_last_error(e);
@@ -372,7 +382,7 @@ pub extern "C" fn sq_get_next_oid(db: *const sql::Client) -> u64 {
 
 #[no_mangle]
 pub extern "C" fn sq_create_index(
-    db: *const sql::Client,
+    db: *const Db,
     _db_id: u64,
     index_id: u64,
     _key_comparator_func: *const (),
@@ -382,7 +392,7 @@ pub extern "C" fn sq_create_index(
         &*db
     };
 
-    let index = match db.create_index(index_id) {
+    let index = match db.client.create_index(index_id) {
         Ok(index) => index,
         Err(e) => {
             update_last_error(e);
@@ -395,7 +405,7 @@ pub extern "C" fn sq_create_index(
 
 #[no_mangle]
 pub extern "C" fn sq_open_index(
-    db: *const sql::Client,
+    db: *const Db,
     _db_id: u64,
     index_id: u64,
     _key_comparator_func: *const (),
@@ -405,7 +415,7 @@ pub extern "C" fn sq_open_index(
         &*db
     };
 
-    let index = match db.open_index(index_id) {
+    let index = match db.client.open_index(index_id) {
         Ok(Some(index)) => index,
         Ok(None) => {
             return std::ptr::null();
@@ -432,7 +442,7 @@ pub extern "C" fn sq_free_index(index: *const sql::Index) {
 #[no_mangle]
 pub extern "C" fn sq_index_insert(
     index: *const sql::Index,
-    _db: *const sql::Client,
+    _db: *const Db,
     txn: *const sql::Transaction,
     key: *const u8,
     length: c_int,
@@ -466,7 +476,7 @@ pub extern "C" fn sq_index_insert(
 #[no_mangle]
 pub extern "C" fn sq_index_begin_scan<'a>(
     index: *const sql::Index,
-    _db: *const sql::Client,
+    _db: *const Db,
     txn: *mut sql::Transaction,
     table: *const sql::Table,
 ) -> *mut sql::IndexScan<'a> {
@@ -507,7 +517,7 @@ pub extern "C" fn sq_free_index_scan_iterator<'a>(scan: *mut sql::IndexScan<'a>)
 #[no_mangle]
 pub extern "C" fn sq_index_rescan<'a>(
     scan: *mut sql::IndexScan<'a>,
-    _db: *const sql::Client,
+    _db: *const Db,
     _start_key: *const u8,
     _length: c_int,
     predicate_func: *const (),
@@ -543,7 +553,7 @@ pub extern "C" fn sq_index_rescan<'a>(
 #[no_mangle]
 pub extern "C" fn sq_index_scan_next<'a>(
     scan: *mut sql::IndexScan<'a>,
-    _db: *const sql::Client,
+    _db: *const Db,
     dir: c_int,
 ) -> *const Vec<u8> {
     let scan = unsafe {
