@@ -1,4 +1,5 @@
 mod client;
+mod ffi;
 mod result;
 mod server;
 

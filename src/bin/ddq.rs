@@ -83,6 +83,4 @@ async fn main() -> Result<()> {
     .await?
     .serve()
     .await
-
-    // Ok(())
 }

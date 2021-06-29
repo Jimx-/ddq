@@ -178,6 +178,7 @@ dependencies = [
  "config",
  "env_logger",
  "futures",
+ "libc",
  "log",
  "rand 0.8.4",
  "serde 1.0.126",
